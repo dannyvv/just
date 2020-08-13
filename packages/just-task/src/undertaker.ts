@@ -4,6 +4,8 @@ import chalk from 'chalk';
 import { wrapTask } from './wrapTask';
 import { Task } from './interfaces';
 import { clearCache } from './cache';
+import yargs from 'yargs';
+import { Profiler } from './profiler';
 
 const undertaker = new Undertaker();
 const NS_PER_SEC = 1e9;
@@ -15,6 +17,10 @@ const tasksInProgress: { [key: string]: boolean } = {};
 const colors = [chalk.cyanBright, chalk.magentaBright, chalk.blueBright, chalk.greenBright, chalk.yellowBright];
 const taskColor: { [taskName: string]: number } = {};
 let colorIndex = 0;
+
+const profiler = !!yargs.argv.profile
+  ? new Profiler(<string | undefined>yargs.argv.profileLocation)
+  : undefined;
 
 function shouldLog(taskArgs: any) {
   return (
@@ -35,7 +41,11 @@ function colorizeTaskName(taskName: string) {
   return colors[taskColor[taskName]](taskName);
 }
 
-undertaker.on('start', function(args: any) {
+undertaker.on('start', function (args: any) {
+  if (profiler) {
+    profiler.start(args.uid, args.name)
+  }
+
   if (shouldLog(args)) {
     if (!topLevelTask) {
       topLevelTask = args.name;
@@ -47,7 +57,12 @@ undertaker.on('start', function(args: any) {
   }
 });
 
-undertaker.on('stop', function(args: any) {
+undertaker.on('stop', function (args: any) {
+  if (profiler) {
+    profiler.stop(args.uid, /*success*/ true)
+  }
+
+
   if (shouldLog(args)) {
     const duration = args.duration;
     const durationInSecs = Math.round(((duration[0] * NS_PER_SEC + duration[1]) / NS_PER_SEC) * 100) / 100;
@@ -58,7 +73,11 @@ undertaker.on('stop', function(args: any) {
   }
 });
 
-undertaker.on('error', function(args: any) {
+undertaker.on('error', function (args: any) {
+  if (profiler) {
+    profiler.stop(args.uid,/*success*/ false)
+  }
+
   delete tasksInProgress[args.name];
 
   if (!errorReported) {
@@ -100,6 +119,11 @@ undertaker.on('error', function(args: any) {
 });
 
 process.on('exit', code => {
+
+  if (profiler) {
+    profiler.write();
+  }
+
   if (code !== 0) {
     logger.error(chalk.dim(`Error previously detected. See above for error messages.`));
   }
